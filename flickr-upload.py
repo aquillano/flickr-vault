@@ -20,6 +20,7 @@
 
 import os
 import sys
+import time
 import re
 import xml
 import tempfile
@@ -27,6 +28,8 @@ from subprocess import call, Popen, PIPE
 import flickrapi
 from optparse import OptionParser
 from common import *
+import shutil
+import sqlite3 as sqlite
 
 parser = OptionParser(usage="Usage: %prog [OPTIONS] [FILENAME]")
 parser.add_option('--public', dest='public', default=False, action='store_true',
@@ -46,6 +49,11 @@ parser.add_option('--date-uploaded', dest='date_uploaded',
 parser.add_option('--date-taken', dest='date_taken',
                   metavar='DATE',
                   help='set the date and time when the photo was taken')
+parser.add_option('--batch', dest='batch',
+				  metavar='BATCH',
+				  help='set the max number of files to upload')
+parser.add_option('--test', dest='test', default=False, action='store_true',
+				  help='test script; don\t actually do anything')
 
 options,args = parser.parse_args()
 
@@ -70,41 +78,92 @@ if not token:
     raw_input("Press 'Enter' after you have authorized this program")
 flickr.get_token_part_two((token, frob))
 
+db_filename = os.path.join(os.environ['HOME'],'.flickr-photos-checksummed.db')
+connection = sqlite.connect(db_filename)
+cursor = connection.cursor()
+cursor.execute("CREATE TABLE IF NOT EXISTS done ( photo_id text unique )")
+
+def carriage_return():
+	sys.stdout.write('\r')
+	sys.stdout.flush()
+
+def add_to_done(photo_id):
+	cursor.execute("INSERT INTO done ( photo_id ) VALUES ( ? )", (photo_id,))
+	connection.commit()
+	if options.verbose:
+		print 'Add photo id to db, done.'
+
 def progress(percent,done):
     if done and options.verbose:
         print "Finished."
     elif options.verbose:
-        print ""+str(int(round(percent)))+"%"
+		print '{0}{1}'.format(str(int(round(percent))), '%'),
+		carriage_return()
+		time.sleep(1)
+        #print ""+str(int(round(percent)))+"%"
 
-real_sha1 = sha1sum(args[0])
-real_md5 = md5sum(args[0])
+def upload_photo(file):
+	real_sha1 = sha1sum(file)
+	real_md5 = md5sum(file)
 
-tags = sha1_machine_tag_prefix + real_sha1 + " " + md5_machine_tag_prefix + real_md5
+	tags = sha1_machine_tag_prefix + real_sha1 + " " + md5_machine_tag_prefix + real_md5
 
-result = flickr.upload(filename=args[0],
-                       callback=progress,
-                       title=(options.title or os.path.basename(args[0])),
-                       tags=tags,
-                       is_public=int(options.public),
-                       is_family=int(options.family),
-                       is_friend=int(options.friends))
+	result = flickr.upload(filename=file,
+						   callback=progress,
+						   title=(options.title or os.path.basename(file)),
+						   tags=tags,
+						   is_public=int(options.public),
+						   is_family=int(options.family),
+						   is_friend=int(options.friends))
 
-photo_id = result.getchildren()[0].text
-if options.verbose:
-    print "photo_id of uploaded photo: "+str(photo_id)
-    print "Uploaded to: "+short_url(photo_id)
+	photo_id = result.getchildren()[0].text
+	if options.verbose:
+		print "photo_id of uploaded photo: "+str(photo_id)
+		print "Uploaded to: "+short_url(photo_id)
 
-if options.date_uploaded or options.date_taken:
-    if options.verbose:
-        print "Setting dates:"
-        if options.date_uploaded:
-            print "  Date uploaded: "+options.date_uploaded
-        if options.date_taken:
-            print "  Date taken: "+options.date_taken
-    result = flickr.photos_setDates(photo_id=photo_id,
-                                    date_posted=options.date_uploaded,
-                                    date_taken=options.date_taken,
-                                    date_taken_granularity=0)
+	if options.date_uploaded or options.date_taken:
+		if options.verbose:
+			print "Setting dates:"
+			if options.date_uploaded:
+				print "  Date uploaded: "+options.date_uploaded
+			if options.date_taken:
+				print "  Date taken: "+options.date_taken
+		result = flickr.photos_setDates(photo_id=photo_id,
+										date_posted=options.date_uploaded,
+										date_taken=options.date_taken,
+										date_taken_granularity=0)
 
-# move and rename file and add photo id to uploaded db
+	# move and rename file using photo_id
+	new_filename = photo_id + '.jpg'
+	dest_path = os.path.join('/media/nas/Pictures/originals/', new_filename)
+	shutil.move(file, dest_path)
+	if options.verbose:
+		print 'Moved {0} to {1}'.format(file, dest_path)
+	
+	# and add photo id to uploaded db
+	add_to_done(photo_id)
 
+if os.path.isfile(args[0]):
+	if options.verbose:
+		print 'isfile = true'
+	upload_photo(args[0])
+	sys.exit(0)
+
+elif os.path.isdir(args[0]):
+	if options.verbose:
+		print 'isdir = true'
+	queued_files = []
+	walk_result = os.walk( args[0] )
+	for data in walk_result:
+		(dirpath, dirnames, filenames) = data
+		for f in filenames:
+			queued_files.append(os.path.join(dirpath, f))
+
+	for f in queued_files:
+		upload_photo(f)
+	
+	sys.exit(0)
+
+else:
+	print "Failed file/directory check."
+	sys.exit(1)

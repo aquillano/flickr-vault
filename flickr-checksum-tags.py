@@ -135,6 +135,17 @@ def info_to_url(info_result,size=""):
     else:
         raise Exception, "Unknown size ("+size+") passed to info_to_url()"
 
+def save_to_file(farm_url, f):
+	print "farm_url is: "+farm_url
+	call(["curl","--location","-o",f.name,farm_url])
+	real_md5sum = md5sum(f.name)
+	real_sha1sum = sha1sum(f.name)
+	print "Calculated MD5: "+real_md5sum
+	print "Calculated SHA1: "+real_sha1sum
+	print "Setting tags..."
+	flickr.photos_addTags(photo_id=id, tags=md5_machine_tag_prefix+real_md5sum)
+	flickr.photos_addTags(photo_id=id, tags=sha1_machine_tag_prefix+real_sha1sum)
+
 if options.md5 or options.sha1:
     # Setup the tag to search for:
     if options.md5:
@@ -227,17 +238,11 @@ else:
 		else:
 			f = tempfile.NamedTemporaryFile()
 			f.close()
-                print "farm_url is: "+farm_url
-                call(["curl","--location","-o",f.name,farm_url])
-                real_md5sum = md5sum(f.name)
-                real_sha1sum = sha1sum(f.name)
-                print "Calculated MD5: "+real_md5sum
-                print "Calculated SHA1: "+real_sha1sum
-                print "Setting tags..."
-                flickr.photos_addTags(photo_id=id, tags=md5_machine_tag_prefix+real_md5sum)
-                flickr.photos_addTags(photo_id=id, tags=sha1_machine_tag_prefix+real_sha1sum)
-                if not options.save:
-                	print "... done.  Removing temporary file."
+
+		save_to_file(farm_url, f)
+
+		if not options.save:
+			print "... done.  Removing temporary file."
 			call(["rm",f.name])
 		else:
 			print "... done."

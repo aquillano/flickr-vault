@@ -1,0 +1,11 @@
+{
+    "name": "flickr-vault",
+    "description": "Backup photos to Flickr",
+    "author": "Steve Aquillano <steveaquillano@gmail.com>",
+    "dependencies": {
+        "awssum": "0.10.x",
+        "fmt": "0.4.x"
+    },
+    "devDependencies": {},
+    "engine": "node >= 0.8.8"
+}
